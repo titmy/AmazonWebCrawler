@@ -1,0 +1,49 @@
+import scrapy
+
+from amazon.items import AmazonItem 
+
+class AmazonSpider(scrapy.Spider):
+	name = "amazon"
+	allowed_domains = ["amazon.com"]
+	start_urls = [
+		"http://www.amazon.com/b/ref=sr_aj?node=3017941&ajr=0"
+	]
+
+	def parse(self, response):
+		for sel in response.xpath('//*[@class="s-result-item  celwidget "]'):
+			item = AmazonItem()
+			item['product'] = sel.xpath('./div/div[2]/div[1]/a/@title').extract()[0]
+			item['link'] = sel.xpath('./div/div[2]/div[1]/a/@href').extract()[0]
+
+			request = scrapy.Request(item['link'], callback=self.parseProductPage)
+			request.meta['item'] = item
+			yield request
+
+		nextPage = response.xpath('//*[@id="pagnNextLink"]/@href')
+		if nextPage:
+			url = response.urljoin(nextPage[0].extract())
+			yield scrapy.Request(url, self.parse)
+
+	def parseProductPage(self, response):
+		item = response.meta['item']
+		item['allReviewLink'] = response.xpath('//*[@id="revF"]/div/a/@href').extract()[0]
+
+		request = scrapy.Request(item['allReviewLink'], callback=self.parseReviewPage)
+		request.meta['item'] = item
+		yield request
+
+	def parseReviewPage(self, response):
+		item = response.meta['item']
+		for sel in response.xpath('//*[@class = "a-section review"]'):
+			item['reviewer'] = sel.xpath('./div[3]/span[1]/a/text()').extract()[0]
+			item['review'] = sel.xpath('./div[5]/span/text()').extract()[0]
+			item['rating'] = sel.xpath('./div[2]/a[1]/i/span/text()').extract()[0]
+			item['date'] = sel.xpath('./div[3]/span[4]/text()').extract()[0][3:]
+			yield item
+
+		next_page = response.xpath('//*[@id="cm_cr-pagination_bar"]/ul/li[8]/a/@href')
+		if next_page:
+			url = response.urljoin(next_page[0].extract())
+			request = scrapy.Request(url, self.parseReviewPage)
+			request.meta['item'] = item
+			yield request
